@@ -145,11 +145,11 @@ class Server:
         while True:
             data , addr = self.server.recvfrom(self.RecvSize) # 整个服务端唯一接收数据的地方
             data = data.decode()
-            print("recv message is ",data)
+            # print("recv message is ",data)
             
             
             with self.lock:
-                print("addrpool is ",self.addrpool)
+                # print("addrpool is ",self.addrpool)
                 if addr in self.addrpool:
                     randomdigit = random.random()
                     if randomdigit<0.5: # 丢包率
