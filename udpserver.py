@@ -24,17 +24,13 @@ class Server:
         self.listen = listen
         self.server = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
         self.server.bind((self.ip,self.port))
-        # self.server.listen(self.listen)
         self.RecvSize = args.RecvSize
         self.recvivedack = {}
         self.recvivedseq = {}
         self.ack = {}
         self.seq = {}
-        self.ConnectKey = {}
         self.addrpool = {} 
-        self.CloseKey = {}
         self.lock = threading.RLock()
-        self.isdismiss = {}
      
     @staticmethod
     def hash_string(s):
@@ -85,7 +81,6 @@ class Server:
                         + datetime  + content    
         checkcode = Server.hash_string(message)
         message = message[0:32] + checkcode + message[32:]
-        print("sent message is ",message)
         
         return message
     
@@ -99,16 +94,11 @@ class Server:
     
     def closeClient(self,addr):
         # 1.发送ACK回应
-        # lock = threading.Lock()
         with self.lock:
             self.ack[addr] = self.recvivedseq[addr] + 1
             self.seq[addr] = self.recvivedack[addr]
-            message = self.domessage(self.seq[addr],self.ack[addr],content="closeconnect #1 from server in close mode",SYN=0,FIN=0)
+            message = self.domessage(self.seq[addr],self.ack[addr],content="closeconnect #1 from server in close mode",SYN=0,FIN=1)
             self.server.sendto(message.encode(),addr)
-            # 2. 等待一段时间再发送FIN报文
-            message = self.domessage(self.seq[addr],self.ack[addr],content= "closeconnect #2 from server in close mode",SYN=0,FIN=1)
-            self.server.sendto(message.encode(),addr)
-            self.CloseKey[addr] = (self.ack[addr], self.seq[addr] + 1)
     
     def buildConnection(self,addr):
         lock = threading.Lock()
@@ -117,8 +107,6 @@ class Server:
             self.ack[addr] = self.recvivedseq[addr] + 1
             message = self.domessage(self.seq[addr],self.ack[addr],content = "buildconnect reply ack:{} from server in build mode".format(self.ack[addr]),SYN=1,FIN=0)
             self.server.sendto(message.encode(),addr)
-            self.ConnectKey[addr] = (self.ack[addr],self.seq[addr] + 1)
-        # 匹配连接成功的关键字:   (seq           ,ack               )
     
     def handle_client(self,addr):
         # lock = threading.Lock()
@@ -127,10 +115,8 @@ class Server:
                 with self.lock:
                     data = self.addrpool[addr].get()
                 if self.TackleMessage(data):
-                    print(f"Recvived content: {data[115:]} in handle_client")
                     syn = int(data[16])
                     fin = int(data[17])
-                    print(f"syn is {syn},fin is {fin} !!")
                     with self.lock:
                         self.recvivedseq[addr] = int(data[0:7])
                         self.recvivedack[addr] = int(data[7:14])
@@ -139,63 +125,37 @@ class Server:
                         # 建立连接报文 客户端发送的第一个建立连接的报文
                         self.buildConnection(addr)
                     elif syn == 0 and fin == 1:
-                        # 断开连接报文 客户端发送的第一个断开连接的报文
                         with self.lock:
-                            self.isdismiss[addr] = False
                             self.closeClient(addr)
-                    else: 
-                        # 如果是正常沟通的报文 分为三种情况 初始化的客户端最后发送的一个确定报文 这个报文不做处理 只用来匹配是否建立连接成功
-                        if (self.recvivedseq[addr],self.recvivedack[addr]) == self.ConnectKey[addr]:
-                            # 匹配成功
-                            print("Connect Success :",addr)
-                            print("current data is :",data)
-                            with self.lock:
-                                self.ConnectKey[addr] = (-1,-1) # 重置连接关键字 后续还会发送相同的seq ack 避免匹配
-                                self.isdismiss[addr] = True
-                            continue
-                        # 第二种情况是 结束连接的客户端发送的最后的回应报文 这个报文也不做处理，只用来匹配是否收到
-                        elif (self.recvivedseq[addr],self.recvivedack[addr]) == self.CloseKey[addr]:
-                            # 匹配关闭报文成功
-                            print("Close Success :",addr)
-                            with self.lock:
-                                self.CloseKey[addr] = (-1,-1)
-                                self.isdismiss.pop(addr)                                
-                                self.recvivedack.pop(addr)                                
-                                self.recvivedseq.pop(addr)                               
-                                self.ack.pop(addr)                                
-                                self.ConnectKey.pop(addr)
-                                self.addrpool.pop(addr)
-                                self.CloseKey.pop(addr)
-                                self.seq.pop(addr)
+                            del self.addrpool[addr]
+                            del self.recvivedack[addr]
+                            del self.recvivedseq[addr]
+                            del self.ack[addr]
+                            del self.seq[addr]
                             break
-                        else:
-                        # 剩下的都是正常的通信报文 直接回复即可!
-                            with self.lock:
-                                self.seq[addr] = self.recvivedack[addr]
-                                self.ack[addr] = self.recvivedseq[addr] + 1
+                    else: 
+                        with self.lock:
+                            self.seq[addr] = self.recvivedack[addr]
+                            self.ack[addr] = self.recvivedseq[addr] + 1
                             message = self.domessage(self.seq[addr],self.ack[addr],
-                                                    content="reply #{} from server in normal mode".format(self.seq[addr]),SYN=0,FIN=0)
+                                                content="reply #{} from server in normal mode".format(self.seq[addr]),SYN=0,FIN=0)
                             self.server.sendto(message.encode(),addr)
-                    with self.lock:
-                        print("current closekey:",self.CloseKey)
-                        print("current ack:",self.ack)
-                        print("current addrpool",self.addrpool)
-                    print(f"first syn : {syn}, fin : {fin}")
     
     def run(self):
         while True:
             data , addr = self.server.recvfrom(self.RecvSize) # 整个服务端唯一接收数据的地方
             data = data.decode()
-            print(f"receivedseq is {int(data[0:7])}, receivedack is {int(data[7:14])}, data is {data}  in main")
+            print("recv message is ",data)
+            
             
             with self.lock:
+                print("addrpool is ",self.addrpool)
                 if addr in self.addrpool:
-                        if self.isdismiss[addr]:
-                            randomdigit = random.random()
-                            if randomdigit<0.05: # 丢包率
-                                print("丢弃")
-                                continue
-                        self.addrpool[addr].put(data)
+                    randomdigit = random.random()
+                    if randomdigit<0.5: # 丢包率
+                        # print("drop the package")
+                        continue
+                    self.addrpool[addr].put(data)
                 else:
                     # 如果没有的话就创建一个 新的线程
                     self.addrpool[addr] = queue.Queue()
@@ -203,10 +163,8 @@ class Server:
                     self.recvivedack[addr] = 0
                     self.recvivedseq[addr] = 0
                     self.ack[addr] = self.recvivedseq[addr] + 1
-                    self.seq[addr] = self.ack
-                    self.ConnectKey[addr] = (-1,-1)
-                    self.CloseKey[addr] = (-1,-1)
-                    self.isdismiss[addr] = False
+                    self.seq[addr] = self.ack[addr]
+
                     thread = Thread(target=self.handle_client,args=(addr,))
                     thread.start()
     
