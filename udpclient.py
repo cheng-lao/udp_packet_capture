@@ -15,11 +15,8 @@ def argsparse():
     parser.add_argument('-num',"--TotalNum",type = int ,default= 12 ,help="File to send", required = False)
     parser.add_argument('-maxs',"--MaxSizeBlock", type = int , default= 1400 ,help="Maximum size of blocks to send and the Maximum can't bigger than the 1400", required=False)
     parser.add_argument('-size',"--Size", type = int , default= 1024 ,help="Size of message to receive and the Minimum can't smaller than the 1024", required=False)
-    parser.add_argument('-t',"--time", type = int , default= 1 ,help="Time to wait for a response (Millisecond)", required=False)
+    parser.add_argument('-t',"--time", type = int , default= 0.2 ,help="Time to wait for a response (second)", required=False)
     args = parser.parse_args()
-    if args.time < 0.7:
-        parser.error("Time can't smaller than 1s, beacuse the time is too short to receive the response message, /\
-                     请不要设置时间过短，因为时间过短会导致客户端认为丢包过多，提前进入关闭连接状态，但是此时服务端可能还在处理请求，导致服务端和客户端的对话节奏不一致")
     if args.Size < 1024:
         parser.error("Size can't smaller than 1024, because the size is too small to receive the response message")
     if args.MaxSizeBlock > 1400:
@@ -113,46 +110,6 @@ class Client:
         else:
             raise ValueError("CheckCode Error")
         
-    def buildConect(self):
-        """建立连接
-        
-        不断循环直到连接建立成功
-        
-        Returns: True 表示连接建立成功
-        """
-        while True:
-            try:
-                # 1. 发送SYN
-                self.seq = random.randint(1,1000)
-                self.ack = 0
-                message = self.domessage(self.seq,ack=self.ack,content="buildconnect #1",SYN=1,FIN=0)
-                self.client.sendto(message.encode(), self.addr)
-                # 2. 接收SYN+ACK
-                response = self.client.recv(1024)
-                response = response.decode()
-                print("response: ",response)
-                syn = response[16:17]
-                fin = response[17:18]
-                if syn == "1" and fin != "1":
-                    self.receivedseq = int(response[0:7])    
-                    self.receivedack = int(response[7:14])
-                    self.seq = self.receivedack
-                    self.ack = self.receivedseq + 1
-                    # 3. 再次发送ACK
-                    print("received seq: ",self.receivedseq)
-                    print("received ack: ",self.receivedack)
-                    print("send ack",self.ack)
-                    print("send seq",self.seq)
-                    message = self.domessage(self.seq,self.ack,content="buildconnect #2",SYN=0,FIN=0)
-                    print("message: ",message)
-                    self.client.sendto(message.encode(), self.addr)
-                    # 4. 连接建立成功
-                    return True
-            except socket.timeout as e:
-                continue
-            except Exception as e:
-                print(e)
-                continue
 
     def countdowntimer(self,WaitTime,callback,request):
         """倒计时定时器
@@ -169,7 +126,7 @@ class Client:
                 return
 
     def resend(self,request):
-        print("resend message: ",request[115:])
+        print("resend message: ",request[115:]) # 重发报文
         self.client.sendto(request.encode(), self.addr)
         if self.isreceive == False:
             self.countdowntimer(self.time,None,request)
@@ -187,31 +144,35 @@ class Client:
                 # 2.接收ACK
                 response = self.client.recv(1024)
                 response = response.decode()
-                
+
                 if self.TackleMessage(response):
-                    # 3.等待下一次 fin
-                    # print("准备发送 fin")
-                    self.receivedseq = int(response[0:7])
-                    self.receivedack = int(response[7:14])
-                    # print("before fin received content :", response[115:])
-                    
-                    response = self.client.recv(1024)
-                    response = response.decode()
-                    self.receivedseq = int(response[0:7])
-                    self.receivedack = int(response[7:14])
                     fin = int(response[17:18])
-                    # print("received content: " , response[115:])
-                    print("fin: ",fin)
                     if fin == 1:
-                        print("接收到 fin")
-                        # 4.发送ACK
-                        self.seq = self.receivedack
-                        self.ack = self.receivedseq + 1
-                        message = self.domessage(self.seq,self.ack,content="closeconnect #2",SYN=0,FIN=0)
-                        print(self.addr)
-                        self.client.sendto(message.encode(),self.addr)
-                        # 后续等待半秒回收资源
                         return True
+                # if self.TackleMessage(response):
+                #     # 3.等待下一次 fin
+                #     # print("准备发送 fin")
+                #     self.receivedseq = int(response[0:7])
+                #     self.receivedack = int(response[7:14])
+                #     # print("before fin received content :", response[115:])
+                    
+                #     response = self.client.recv(1024)
+                #     response = response.decode()
+                #     self.receivedseq = int(response[0:7])
+                #     self.receivedack = int(response[7:14])
+                #     fin = int(response[17:18])
+                #     # print("received content: " , response[115:])
+                #     print("fin: ",fin)
+                #     if fin == 1:
+                #         print("接收到 fin")
+                #         # 4.发送ACK
+                #         self.seq = self.receivedack
+                #         self.ack = self.receivedseq + 1
+                #         message = self.domessage(self.seq,self.ack,content="closeconnect #2",SYN=0,FIN=0)
+                #         print(self.addr)
+                #         self.client.sendto(message.encode(),self.addr)
+                #         # 后续等待半秒回收资源
+                #         return True
             except socket.timeout as e:
                 print("time out, send fin again")
                 continue
@@ -223,7 +184,7 @@ class Client:
     def statistics(self):
         self.RTTlist = [i for i in self.RTTlist if i > 0]
         print("success count: ", self.successcount)
-        print("丢包率: {:0.3f}‰".format(1000*(self.num-self.successcount)/self.num))
+        print("丢包率: {:0.3f}%".format(100*(self.num-self.successcount)/self.num))
         print("mean RTT: ",sum(self.RTTlist)/self.successcount)
         print("max RTT: ",max(self.RTTlist))
 
@@ -231,23 +192,64 @@ class Client:
         print("min RTT: ",minRTT)
         datetime1 = dt.strptime(self.firstdatetime, "%Y-%m-%d %H:%M:%S")
         datetime2 = dt.strptime(self.lastdatetime, "%Y-%m-%d %H:%M:%S")
-        print(datetime1)
-        print(datetime2)
-        difference = (datetime2 - datetime1)
-        print(difference)
+        difference = (datetime2 - datetime1).total_seconds()
         total_microseconds = difference * 1000
-        print("Server的整体响应时间: ", total_microseconds, "μs")  #TODO: 处理一下时间的格式
+        print("Server的整体响应时间: ", total_microseconds, "ms")  #TODO: 处理一下时间的格式
+
+    def buildConect(self):
+        """建立连接
+        
+        不断循环直到连接建立成功
+        
+        Returns: True 表示连接建立成功
+        """
+        # 初始建立连接的时候不需要线程 超时了就不断重发直到可以建立连接为止
+        self.client.settimeout(1)   # 设置超时时间 初始为1s 后面正常发送文件使用设置的超时时间
+        while True:
+            try:
+                # 1. 发送SYN
+                self.seq = random.randint(1,1000)
+                self.ack = 0
+                message = self.domessage(self.seq,ack=self.ack,content="buildconnect #1",SYN=1,FIN=0)
+                
+                self.client.sendto(message.encode(), self.addr)
+                # 2. 接收SYN+ACK
+                response = self.client.recv(1024)
+                response = response.decode()
+                # print("response: ",response)
+                syn = response[16:17]
+                fin = response[17:18]
+                if syn == "1" and fin != "1":
+                    self.receivedseq = int(response[0:7])    
+                    self.receivedack = int(response[7:14])
+                    self.seq = self.receivedack
+                    self.ack = self.receivedseq + 1
+                    # 3. 再次发送ACK
+                    # print("received seq: ",self.receivedseq)
+                    # print("received ack: ",self.receivedack)
+                    # print("send ack",self.ack)
+                    # print("send seq",self.seq)
+                    # message = self.domessage(self.seq,self.ack,content="buildconnect #2",SYN=0,FIN=0)
+                    # print("message: ",message)
+                    # self.client.sendto(message.encode(), self.addr)
+                    # 4. 连接建立成功
+                    return True
+            except socket.timeout as e:
+                continue
+            except Exception as e:
+                print("raise error",e)
+                continue
 
     def run(self):
         #1.建立连接
-        self.buildConect()
-        print("connect success")
+        status = self.buildConect()
+        if status: print("connect success")
         #2.发送报文
         self.successcount = 0
         thread1 = None
-        self.client.settimeout(self.time)
+        self.client.settimeout(self.time*2 + 1e-3) # 设置超时时间
         for i in range(1,self.num+1): 
-            time.sleep(0.5)
+            # time.sleep(0.5)
             try:
                 self.seq = self.receivedack
                 self.ack = self.receivedseq + 1
@@ -257,16 +259,18 @@ class Client:
                 starttime = time.perf_counter()
                 thread1 = threading.Thread(target=self.countdowntimer,args=(self.time,self.resend,request))
                 thread1.start()
+                
+                #发送报文
                 self.client.sendto(request.encode(), self.addr)
-                print("send message: ",content)
-                response = self.client.recv(1024)
+
+                response = self.client.recv(1024)   # 接收响应报文
                 # 处理报文
                 response = response.decode()
                 if self.TackleMessage(response):
                     self.isreceive = True
                     self.receivedseq = int(response[0:7])
                     self.receivedack = int(response[7:14])
-                    # print("index number: {},index number:{} , {}".format(i,self.receivedseq,self.receivedack))
+                    
                     endtime = time.perf_counter()
                     print("RTT:{:0.6f} ms".format((endtime-starttime)*1000))
             
@@ -274,16 +278,16 @@ class Client:
                 # print("index number: {},request time out".format(i))
                 self.RTTlist.append((-1)*1000)
                 self.isreceive = False
-                continue
+                continue    # 放弃发送下一个 报文
             except Exception as e:
                 self.isreceive = False
-                print("rasie error: ",e)
+                print("raise error: ",e)
                 self.RTTlist.append((-1)*1000)
                 continue
-            else: 
+            else:
+                # 接收响应报文成功 
                 self.isreceive = True
-                # print("index number: {},index number:{} , {}".format(i,self.receivedseq,self.receivedack))
-                # print("received message: ",response[115:])
+
                 self.RTTlist.append((endtime-starttime)*1000)
                 self.successcount += 1
             finally:
