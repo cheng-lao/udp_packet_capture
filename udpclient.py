@@ -149,30 +149,6 @@ class Client:
                     fin = int(response[17:18])
                     if fin == 1:
                         return True
-                # if self.TackleMessage(response):
-                #     # 3.等待下一次 fin
-                #     # print("准备发送 fin")
-                #     self.receivedseq = int(response[0:7])
-                #     self.receivedack = int(response[7:14])
-                #     # print("before fin received content :", response[115:])
-                    
-                #     response = self.client.recv(1024)
-                #     response = response.decode()
-                #     self.receivedseq = int(response[0:7])
-                #     self.receivedack = int(response[7:14])
-                #     fin = int(response[17:18])
-                #     # print("received content: " , response[115:])
-                #     print("fin: ",fin)
-                #     if fin == 1:
-                #         print("接收到 fin")
-                #         # 4.发送ACK
-                #         self.seq = self.receivedack
-                #         self.ack = self.receivedseq + 1
-                #         message = self.domessage(self.seq,self.ack,content="closeconnect #2",SYN=0,FIN=0)
-                #         print(self.addr)
-                #         self.client.sendto(message.encode(),self.addr)
-                #         # 后续等待半秒回收资源
-                #         return True
             except socket.timeout as e:
                 print("time out, send fin again")
                 continue
@@ -224,15 +200,6 @@ class Client:
                     self.receivedack = int(response[7:14])
                     self.seq = self.receivedack
                     self.ack = self.receivedseq + 1
-                    # 3. 再次发送ACK
-                    # print("received seq: ",self.receivedseq)
-                    # print("received ack: ",self.receivedack)
-                    # print("send ack",self.ack)
-                    # print("send seq",self.seq)
-                    # message = self.domessage(self.seq,self.ack,content="buildconnect #2",SYN=0,FIN=0)
-                    # print("message: ",message)
-                    # self.client.sendto(message.encode(), self.addr)
-                    # 4. 连接建立成功
                     return True
             except socket.timeout as e:
                 continue
